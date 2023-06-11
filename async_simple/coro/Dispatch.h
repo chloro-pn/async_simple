@@ -42,6 +42,17 @@ inline std::coroutine_handle<> GetContinuationFromHandle(
         *static_cast<void**>(static_cast<void*>(ptr)));
 }
 
+inline Executor* GetExecutorFromHandle(std::coroutine_handle<> h) {
+    std::coroutine_handle<> continuation = GetContinuationFromHandle(h);
+    if (!continuation.address()) {
+        return nullptr;
+    }
+    auto& promise =
+        std::coroutine_handle<LazyPromiseBase>::from_address(h.address())
+            .promise();
+    return promise._executor;
+}
+
 inline void ChangeLaziessExecutorTo(std::coroutine_handle<> h, Executor* ex) {
     while (true) {
         std::coroutine_handle<> continuation = GetContinuationFromHandle(h);
@@ -109,6 +120,17 @@ private:
 inline detail::DispatchAwaitable dispatch(Executor* ex) {
     logicAssert(ex != nullptr, "dispatch's param should not be nullptr");
     return detail::DispatchAwaitable(ex);
+}
+
+inline void dispatch(Executor* ex, std::coroutine_handle<> h) {
+    Executor* old_ex = detail::GetExecutorFromHandle(h);
+    detail::ChangeLaziessExecutorTo(h, ex);
+    bool succ = ex->schedule(std::move(h));
+    if (succ == false)
+        AS_UNLIKELY {
+            detail::ChangeLaziessExecutorTo(h, old_ex);
+            throw std::runtime_error("dispatch to executor failed");
+        }
 }
 
 }  // namespace coro
